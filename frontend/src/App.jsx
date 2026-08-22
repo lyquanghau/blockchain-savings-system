@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import * as THREE from "three";
 import { BrowserProvider, Contract, formatUnits, parseUnits } from "ethers";
 import {
   AUTO_RENEW_GRACE_PERIOD_DAYS,
@@ -9,6 +10,174 @@ import {
 import { coreAbi, tokenAbi, vaultAbi } from "./abi";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+function ThreeLandingScene({ active, onToggle }) {
+  const mountRef = useRef(null);
+  const activeRef = useRef(active);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return undefined;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+    camera.position.set(0, 1.1, 8);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    mount.appendChild(renderer.domElement);
+
+    const group = new THREE.Group();
+    scene.add(group);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 1.6);
+    const key = new THREE.DirectionalLight(0xffffff, 2.4);
+    key.position.set(3, 5, 5);
+    const rim = new THREE.PointLight(0x38bdf8, 4, 16);
+    rim.position.set(-3, 2, 3);
+    scene.add(ambient, key, rim);
+
+    const coin = new THREE.Group();
+    const coinBody = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.28, 1.28, 0.28, 96),
+      new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        metalness: 0.72,
+        roughness: 0.2,
+        emissive: 0x075985,
+        emissiveIntensity: 0.18
+      })
+    );
+    coinBody.rotation.x = Math.PI / 2;
+    const coinRing = new THREE.Mesh(
+      new THREE.TorusGeometry(1.34, 0.055, 18, 96),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.45, roughness: 0.18 })
+    );
+    coinRing.position.z = 0.16;
+    const coinCore = new THREE.Mesh(
+      new THREE.BoxGeometry(0.62, 0.62, 0.08),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.25, roughness: 0.16 })
+    );
+    coinCore.position.z = 0.22;
+    coinCore.rotation.z = Math.PI / 4;
+    coin.add(coinBody, coinRing, coinCore);
+    coin.position.set(0, 0.75, 0);
+    group.add(coin);
+
+    const platform = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.25, 2.65, 0.34, 96),
+      new THREE.MeshStandardMaterial({
+        color: 0xdff6ff,
+        metalness: 0.2,
+        roughness: 0.32,
+        transparent: true,
+        opacity: 0.82
+      })
+    );
+    platform.position.set(0, -1.18, 0);
+    group.add(platform);
+
+    const columnMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.28, metalness: 0.1 });
+    [-0.9, 0, 0.9].forEach((x, index) => {
+      const column = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, index === 1 ? 1.14 : 0.92, 32), columnMaterial);
+      column.position.set(x, -0.6 + (index === 1 ? 0.08 : 0), -0.12);
+      group.add(column);
+    });
+
+    const cloudMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.75,
+      transparent: true,
+      opacity: 0.86
+    });
+    const clouds = [];
+    function makeCloud(x, y, z, scale) {
+      const cloud = new THREE.Group();
+      [0, 0.42, -0.42, 0.82].forEach((offset, index) => {
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(index === 1 ? 0.32 : 0.25, 24, 18), cloudMaterial);
+        puff.position.set(offset, index === 1 ? 0.12 : 0, 0);
+        cloud.add(puff);
+      });
+      cloud.position.set(x, y, z);
+      cloud.scale.setScalar(scale);
+      scene.add(cloud);
+      clouds.push(cloud);
+    }
+    makeCloud(-2.8, 1.8, -0.4, 0.82);
+    makeCloud(2.35, 1.22, -0.2, 0.68);
+    makeCloud(-2.1, -0.25, 0.2, 0.54);
+
+    const particleGeometry = new THREE.BufferGeometry();
+    const particleCount = 90;
+    const positions = new Float32Array(particleCount * 3);
+    for (let i = 0; i < particleCount; i += 1) {
+      positions[i * 3] = (Math.random() - 0.5) * 7;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * 4.8;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 2.5;
+    }
+    particleGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const particles = new THREE.Points(
+      particleGeometry,
+      new THREE.PointsMaterial({ color: 0xffffff, size: 0.035, transparent: true, opacity: 0.9 })
+    );
+    scene.add(particles);
+
+    const pointer = { x: 0, y: 0 };
+    function resize() {
+      const { width, height } = mount.getBoundingClientRect();
+      renderer.setSize(width, height, false);
+      camera.aspect = width / Math.max(height, 1);
+      camera.updateProjectionMatrix();
+    }
+    function onPointerMove(event) {
+      const rect = mount.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
+      pointer.y = -((event.clientY - rect.top) / rect.height - 0.5) * 2;
+    }
+    mount.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("resize", resize);
+    resize();
+
+    let frameId = 0;
+    const clock = new THREE.Clock();
+    function animate() {
+      const elapsed = clock.getElapsedTime();
+      group.rotation.y += (pointer.x * 0.22 - group.rotation.y) * 0.04;
+      group.rotation.x += (pointer.y * 0.12 - group.rotation.x) * 0.04;
+      coin.rotation.y += activeRef.current ? 0.075 : 0.018;
+      coin.rotation.x = Math.sin(elapsed * 1.4) * 0.12;
+      coin.position.y = 0.75 + Math.sin(elapsed * 1.8) * 0.16;
+      clouds.forEach((cloud, index) => {
+        cloud.position.x += Math.sin(elapsed * (0.35 + index * 0.05)) * 0.003;
+        cloud.position.y += Math.cos(elapsed * (0.55 + index * 0.08)) * 0.002;
+      });
+      particles.rotation.y = elapsed * 0.035;
+      particles.rotation.x = Math.sin(elapsed * 0.3) * 0.05;
+      renderer.render(scene, camera);
+      frameId = requestAnimationFrame(animate);
+    }
+    animate();
+
+    renderer.domElement.addEventListener("click", onToggle);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      renderer.domElement.removeEventListener("click", onToggle);
+      mount.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("resize", resize);
+      renderer.dispose();
+      particleGeometry.dispose();
+      mount.removeChild(renderer.domElement);
+    };
+  }, [onToggle]);
+
+  return <div className="three-scene" ref={mountRef} />;
+}
 
 function formatAmount(value) {
   return Number(formatUnits(value || 0n, USDC_DECIMALS)).toLocaleString(undefined, {
@@ -201,6 +370,10 @@ export default function App() {
   });
   const [message, setMessage] = useState("");
   const [hasMetaMask, setHasMetaMask] = useState(Boolean(window.ethereum));
+  const [hasEnteredApp, setHasEnteredApp] = useState(false);
+  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, plans, portfolio, admin
+  const [sceneActive, setSceneActive] = useState(false);
+  const [sceneStyle, setSceneStyle] = useState({ "--rx": "0deg", "--ry": "0deg" });
   const [adminOpen, setAdminOpen] = useState(false);
   const [popup, setPopup] = useState({ open: false, title: "", body: "" });
   const [walletDisconnectOpen, setWalletDisconnectOpen] = useState(false);
@@ -227,6 +400,475 @@ export default function App() {
   const totalPrincipal = activeDeposits.reduce((sum, deposit) => sum + deposit.principal, 0n);
   const totalInterest = activeDeposits.reduce((sum, deposit) => sum + deposit.expectedInterest, 0n);
   const txTone = getTxTone(message);
+
+  function handleSceneMove(event) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = (event.clientX - bounds.left) / bounds.width - 0.5;
+    const y = (event.clientY - bounds.top) / bounds.height - 0.5;
+    setSceneStyle({
+      "--rx": `${(-y * 10).toFixed(2)}deg`,
+      "--ry": `${(x * 12).toFixed(2)}deg`
+    });
+  }
+
+  function resetSceneMove() {
+    setSceneStyle({ "--rx": "0deg", "--ry": "0deg" });
+  }
+
+  const toggleScene = useCallback(() => {
+    setSceneActive((current) => !current);
+  }, []);
+
+  function renderMarketTable() {
+    if (plans.length === 0) {
+      return <p className="empty-state">No earn products are available yet.</p>;
+    }
+
+    return (
+      <table className="market-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>APR</th>
+            <th>Term</th>
+            <th>Limits</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {plans.map((plan) => (
+            <tr key={plan.planId.toString()}>
+              <td>
+                <div className="asset-cell">
+                  <div className="asset-icon">U</div>
+                  <div>
+                    <strong>mUSDC Fixed Savings</strong>
+                    <div className="mono" style={{ color: "var(--muted)", fontSize: "12px" }}>
+                      Plan #{plan.planId.toString()}
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td><span className="apy">{(Number(plan.aprBps) / 100).toFixed(2)}%</span></td>
+              <td>{plan.tenorDays.toString()} days</td>
+              <td>
+                {formatAmount(plan.minDeposit)} - {plan.maxDeposit === 0n ? "Unlimited" : formatAmount(plan.maxDeposit)} USDC
+              </td>
+              <td>
+                <span className={plan.enabled ? "badge-active" : "badge-disabled"}>
+                  {plan.enabled ? "Open" : "Disabled"}
+                </span>
+              </td>
+              <td>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    setSelectedPlanId(plan.planId.toString());
+                    setActiveTab("plans");
+                  }}
+                  disabled={!plan.enabled}
+                >
+                  Subscribe
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+
+  function renderLanding() {
+    return (
+      <main
+        className={`landing-screen ${sceneActive ? "scene-active" : ""}`}
+        style={sceneStyle}
+        onMouseMove={handleSceneMove}
+        onMouseLeave={resetSceneMove}
+      >
+        <div className="landing-copy">
+          <span className="hero-kicker">Nebula Earn Protocol</span>
+          <h1>Banking enters the Web3 sky.</h1>
+          <p>
+            A fixed-yield savings experience with on-chain certificates, transparent vault
+            reserves, and a product interface built for modern digital banking.
+          </p>
+          <div className="landing-actions">
+          <button className="primary landing-start" onClick={() => setHasEnteredApp(true)}>
+              Start Banking
+            </button>
+            <button className="secondary" onClick={toggleScene}>
+              Toggle 3D Coin
+            </button>
+          </div>
+        </div>
+
+        <div className="landing-stage">
+          <ThreeLandingScene active={sceneActive} onToggle={toggleScene} />
+        </div>
+
+        <div className="landing-orbit orbit-one"></div>
+        <div className="landing-orbit orbit-two"></div>
+      </main>
+    );
+  }
+
+  function renderDashboard() {
+    const bestPlan = plans.reduce((best, plan) => {
+      if (!best || Number(plan.aprBps) > Number(best.aprBps)) return plan;
+      return best;
+    }, null);
+
+    return (
+      <>
+        <section className="product-hero product-hero-compact">
+          <div>
+            <span className="hero-kicker">Web3 Savings Bank</span>
+            <h3>Fixed Yield Savings for On-chain Stablecoins</h3>
+            <p>
+              Lock mUSDC into transparent term products, receive an NFT position certificate,
+              and settle principal plus interest directly from smart contracts.
+            </p>
+            <div className="hero-metrics">
+              <div className="hero-metric">
+                <span>Best APR</span>
+                <strong>{bestPlan ? `${(Number(bestPlan.aprBps) / 100).toFixed(2)}%` : "0.00%"}</strong>
+              </div>
+              <div className="hero-metric">
+                <span>Products</span>
+                <strong>{plans.length}</strong>
+              </div>
+              <div className="hero-metric">
+                <span>System</span>
+                <strong>{paused ? "Paused" : "Live"}</strong>
+              </div>
+            </div>
+          </div>
+          <div className="trade-ticket">
+            <h4>Quick Subscribe</h4>
+            <div className="form-group">
+              <label>Plan</label>
+              <select value={selectedPlanId} onChange={(event) => setSelectedPlanId(event.target.value)}>
+                {plans.map((plan) => (
+                  <option key={plan.planId.toString()} value={plan.planId.toString()}>
+                    {plan.tenorDays.toString()} days - {(Number(plan.aprBps) / 100).toFixed(2)}% APR
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Amount</label>
+              <input
+                type="number"
+                value={depositAmount}
+                onChange={(event) => setDepositAmount(event.target.value)}
+              />
+            </div>
+            <button
+              className="primary"
+              style={{ width: "100%" }}
+              onClick={handleOpenDeposit}
+              disabled={!selectedPlan || !selectedPlan.enabled || !onExpectedNetwork || paused}
+            >
+              Subscribe
+            </button>
+          </div>
+        </section>
+
+        <div className="stats-grid">
+          <article className="stat-card">
+            <span className="stat-label">Portfolio Principal</span>
+            <div className="stat-value">{formatAmount(totalPrincipal)} USDC</div>
+            <div className="stat-footer">Across {activeDeposits.length} certificates</div>
+          </article>
+          <article className="stat-card">
+            <span className="stat-label">Accrued Interest</span>
+            <div className="stat-value" style={{ color: "var(--green)" }}>
+              {formatAmount(totalInterest)} USDC
+            </div>
+            <div className="stat-footer">Expected upon maturity</div>
+          </article>
+          <article className="stat-card">
+            <span className="stat-label">Vault Reserve</span>
+            <div className="stat-value">{vaultBalance} USDC</div>
+            <div className="stat-footer">{paused ? "System Paused" : "Liquidity Available"}</div>
+          </article>
+          <article className="stat-card">
+            <span className="stat-label">Wallet Balance</span>
+            <div className="stat-value">{walletTokenBalance} USDC</div>
+            <div className="stat-footer">{onExpectedNetwork ? "Connected" : "Wrong Network"}</div>
+          </article>
+        </div>
+
+        <section className="market-panel">
+          <div className="section-header">
+            <div>
+              <h3>Earn Markets</h3>
+              <p>Live fixed-term products available from the protocol.</p>
+            </div>
+          </div>
+          {renderMarketTable()}
+        </section>
+      </>
+    );
+  }
+
+  function renderPortfolio() {
+    return (
+      <>
+        <div className="section-header">
+          <h3>Your Savings Portfolio</h3>
+          <p style={{ color: "var(--muted)", fontSize: "14px" }}>
+            Track your certificates and settle them upon maturity.
+          </p>
+        </div>
+
+        {deposits.length === 0 && <p className="empty-state">No deposits found for this wallet.</p>}
+
+        <div className="deposit-list">
+          {deposits.map((deposit) => {
+            const depositId = deposit.depositId.toString();
+            const isActive = statusLabel(deposit.status) === "Active";
+            const maturityTimeMs = Number(deposit.maturityAt) * 1000;
+            const autoRenewTimeMs = maturityTimeMs + AUTO_RENEW_GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+            const isMatured = maturityTimeMs <= chainNowMs;
+            const canAutoRenew = autoRenewTimeMs <= chainNowMs;
+            const progress = getProgressPercent(deposit.startAt, deposit.maturityAt, chainNowMs / 1000);
+            
+            return (
+              <article key={depositId} className="deposit-item">
+                <div className="deposit-info">
+                  <div className="mono" style={{ fontSize: "12px", color: "var(--brand)", fontWeight: "600", marginBottom: "4px" }}>
+                    NFT CERTIFICATE #{depositId}
+                  </div>
+                  <h5>Plan #{deposit.planId.toString()}</h5>
+                  <p>{formatAmount(deposit.principal)} USDC Principal</p>
+                </div>
+
+                <div className="progress-container">
+                  <div className="progress-labels">
+                    <span>Maturity: {new Date(maturityTimeMs).toLocaleDateString()}</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div className="progress-bar">
+                    <div className="progress-inner" style={{ width: `${progress}%` }}></div>
+                  </div>
+                </div>
+
+                <div className="deposit-status">
+                  <span className={`deposit-status ${isActive ? (isMatured ? "status-matured" : "status-active") : "status-closed"}`}>
+                    {isActive ? (isMatured ? "MATURED" : "ACTIVE") : statusLabel(deposit.status).toUpperCase()}
+                  </span>
+                </div>
+
+                <div className="deposit-actions">
+                  <button 
+                    className="secondary" 
+                    onClick={() => openConfirmAction("settle", deposit)}
+                    disabled={!canUseContracts || !onExpectedNetwork || paused || !isActive || !isMatured}
+                  >
+                    Settle
+                  </button>
+                  <button 
+                    className="secondary"
+                    onClick={() => openConfirmAction("earlyExit", deposit)}
+                    disabled={!canUseContracts || !onExpectedNetwork || paused || !isActive || isMatured}
+                  >
+                    Early Exit
+                  </button>
+                  {isMatured && (
+                    <button 
+                      className="primary"
+                      onClick={() => openConfirmAction("manualRenew", deposit)}
+                      disabled={!canUseContracts || !onExpectedNetwork || paused || !isActive}
+                    >
+                      Renew
+                    </button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+
+  function renderAdmin() {
+    return (
+      <div className="admin-grid">
+        <div className="admin-section">
+          <h3>Create Savings Plan</h3>
+          <p className="plan-desc">Define parameters for a new investment product.</p>
+          <div className="form-group">
+            <label>Tenor (Days)</label>
+            <input value={planForm.tenorDays} onChange={(e) => setPlanForm({ ...planForm, tenorDays: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label>APR (Basis Points, e.g. 1200 = 12%)</label>
+            <input value={planForm.aprBps} onChange={(e) => setPlanForm({ ...planForm, aprBps: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label>Min Deposit (USDC)</label>
+            <input value={planForm.minDeposit} onChange={(e) => setPlanForm({ ...planForm, minDeposit: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label>Max Deposit (USDC, 0 for unlimited)</label>
+            <input value={planForm.maxDeposit} onChange={(e) => setPlanForm({ ...planForm, maxDeposit: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label>Early Withdrawal Penalty (Basis Points)</label>
+            <input value={planForm.penaltyBps} onChange={(e) => setPlanForm({ ...planForm, penaltyBps: e.target.value })} />
+          </div>
+          <button className="primary" style={{ width: "100%" }} onClick={handleCreatePlan} disabled={!canUseContracts || !onExpectedNetwork}>
+            Deploy New Plan
+          </button>
+        </div>
+
+        <div className="admin-section">
+          <h3>Vault Management</h3>
+          <p className="plan-desc">Manage the interest reserve liquidity.</p>
+          <div className="stat-card" style={{ marginBottom: "20px", background: "#f8fafc" }}>
+            <span className="stat-label">Available Vault Balance</span>
+            <div className="stat-value" style={{ fontSize: "20px" }}>{vaultBalance} USDC</div>
+          </div>
+          <div className="form-group">
+            <label>Fund Amount (USDC)</label>
+            <input value={vaultAmount} onChange={(e) => setVaultAmount(e.target.value)} />
+          </div>
+          <button className="secondary" style={{ width: "100%", marginBottom: "16px" }} onClick={handleFundVault} disabled={!canUseContracts || !onExpectedNetwork}>
+            Fund Vault
+          </button>
+          <div className="form-group">
+            <label>Withdraw Amount (USDC)</label>
+            <input value={vaultWithdrawAmount} onChange={(e) => setVaultWithdrawAmount(e.target.value)} />
+          </div>
+          <button className="secondary" style={{ width: "100%" }} onClick={handleWithdrawVault} disabled={!canUseContracts || !onExpectedNetwork}>
+            Withdraw Free Liquidity
+          </button>
+          
+          <div className="admin-actions-inline" style={{ marginTop: "24px" }}>
+            <button className={paused ? "primary" : "secondary"} style={{ flex: 1 }} onClick={() => handlePause(!paused)}>
+              {paused ? "Resume System" : "Pause System"}
+            </button>
+          </div>
+        </div>
+
+        <div className="admin-section">
+          <h3>Protocol Configuration</h3>
+          <div className="form-group">
+            <label>Current Fee Receiver</label>
+            <div className="mono" style={{ fontSize: "12px", background: "#f8fafc", padding: "10px", borderRadius: "8px", marginBottom: "12px" }}>
+              {currentFeeReceiver}
+            </div>
+            <label>New Fee Receiver Address</label>
+            <input value={feeReceiverAddress} onChange={(e) => setFeeReceiverAddress(e.target.value)} />
+          </div>
+          <button className="secondary" style={{ width: "100%" }} onClick={handleSetFeeReceiver} disabled={!canUseContracts || !onExpectedNetwork || !feeReceiverAddress}>
+            Update Fee Receiver
+          </button>
+
+          <h4 style={{ marginTop: "32px", marginBottom: "12px" }}>Active Plans</h4>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {plans.map(plan => (
+              <div key={plan.planId.toString()} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "#f8fafc", borderRadius: "8px" }}>
+                <span className="mono">Plan #{plan.planId.toString()}</span>
+                <button className="secondary" style={{ padding: "4px 12px", fontSize: "12px" }} onClick={() => handleTogglePlan(plan.planId, plan.enabled)}>
+                  {plan.enabled ? "Disable" : "Enable"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderPlans() {
+    return (
+      <>
+        <div className="section-header">
+          <div>
+            <h3>Earn Products</h3>
+            <p>Choose a fixed term and subscribe with your wallet balance.</p>
+          </div>
+          <button className="secondary" onClick={() => refreshData()} disabled={!canUseContracts}>
+            Refresh
+          </button>
+        </div>
+
+        <div className="plans-grid">
+          {plans.length === 0 && <p className="empty-state">No plans are available yet.</p>}
+          {plans.map((plan) => {
+            const isSelected = plan.planId.toString() === selectedPlanId;
+            return (
+              <article key={plan.planId.toString()} className={`plan-card ${isSelected ? "plan-card-selected" : ""}`}>
+                <div>
+                  <span className={plan.enabled ? "badge-active" : "badge-disabled"}>
+                    {plan.enabled ? "Open for subscription" : "Disabled"}
+                  </span>
+                  <h4>mUSDC Fixed Savings - {plan.tenorDays.toString()} Days</h4>
+                  <p className="plan-desc">
+                    Fixed APR is snapshotted at subscription time. Principal stays in SavingCore,
+                    while interest is paid from the protocol vault at maturity.
+                  </p>
+                  <div className="plan-metrics">
+                    <div className="metric-item">
+                      <span>APR</span>
+                      <strong className="apy">{(Number(plan.aprBps) / 100).toFixed(2)}%</strong>
+                    </div>
+                    <div className="metric-item">
+                      <span>Term</span>
+                      <strong>{plan.tenorDays.toString()} days</strong>
+                    </div>
+                    <div className="metric-item">
+                      <span>Early exit fee</span>
+                      <strong>{(Number(plan.earlyWithdrawPenaltyBps) / 100).toFixed(2)}%</strong>
+                    </div>
+                    <div className="metric-item">
+                      <span>Limits</span>
+                      <strong>
+                        {formatAmount(plan.minDeposit)} - {plan.maxDeposit === 0n ? "Unlimited" : formatAmount(plan.maxDeposit)} USDC
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="trade-ticket">
+                  <h4>{isSelected ? "Subscription ticket" : "Select product"}</h4>
+                  <div className="form-group">
+                    <label>Amount</label>
+                    <input
+                      type="number"
+                      value={isSelected ? depositAmount : ""}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      placeholder="1000"
+                      disabled={!isSelected}
+                    />
+                  </div>
+                  <button
+                    className={isSelected ? "primary" : "secondary"}
+                    style={{ width: "100%" }}
+                    onClick={() => {
+                      if (isSelected) {
+                        handleOpenDeposit();
+                      } else {
+                        setSelectedPlanId(plan.planId.toString());
+                      }
+                    }}
+                    disabled={!plan.enabled || !onExpectedNetwork || paused}
+                  >
+                    {isSelected ? "Subscribe Now" : "Select Product"}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
 
   function resetWalletState() {
     setAccount("");
@@ -611,516 +1253,155 @@ export default function App() {
   }, []);
 
   return (
-    <div className="app-shell">
+    !hasEnteredApp ? renderLanding() :
+    <div className="app-container">
+      {/* Modals & Popups */}
       {confirmAction && (
-        <div className="popup-backdrop" onClick={closeConfirmAction} role="presentation">
-          <div
-            className="popup-card"
-            onClick={(event) => event.stopPropagation()}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="confirm-action-title"
-          >
-            <div className="popup-head">
-              <div>
-                <p className="eyebrow">Deposit Review</p>
-                <h2 id="confirm-action-title">{getActionTitle(confirmAction.action)}</h2>
-              </div>
-              <button type="button" onClick={closeConfirmAction}>
-                Close
-              </button>
+        <div className="modal-overlay" onClick={closeConfirmAction}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 id="confirm-action-title">{getActionTitle(confirmAction.action)}</h3>
+              <button className="secondary" onClick={closeConfirmAction}>&times;</button>
             </div>
-            <div className="confirm-grid">
-              <div>
-                <span>Certificate</span>
-                <strong className="data-mono">#{confirmAction.deposit.depositId.toString()}</strong>
+            <div className="modal-body">
+              <div className="confirm-grid">
+                <div>
+                  <span>Certificate</span>
+                  <strong className="mono">#{confirmAction.deposit.depositId.toString()}</strong>
+                </div>
+                <div>
+                  <span>Plan</span>
+                  <strong className="mono">#{confirmAction.deposit.planId.toString()}</strong>
+                </div>
+                <div>
+                  <span>Principal</span>
+                  <strong className="mono">{formatAmount(confirmAction.deposit.principal)} USDC</strong>
+                </div>
+                <div>
+                  <span>Interest</span>
+                  <strong className="mono">{formatAmount(confirmAction.deposit.expectedInterest)} USDC</strong>
+                </div>
+                <div>
+                  <span>Maturity</span>
+                  <strong>{formatDateTime(confirmAction.deposit.maturityAt)}</strong>
+                </div>
+                <div>
+                  <span>Status</span>
+                  <strong>{statusLabel(confirmAction.deposit.status)}</strong>
+                </div>
               </div>
-              <div>
-                <span>Plan</span>
-                <strong className="data-mono">#{confirmAction.deposit.planId.toString()}</strong>
-              </div>
-              <div>
-                <span>Principal</span>
-                <strong className="data-mono">{formatAmount(confirmAction.deposit.principal)} USDC</strong>
-              </div>
-              <div>
-                <span>Interest</span>
-                <strong className="data-mono">{formatAmount(confirmAction.deposit.expectedInterest)} USDC</strong>
-              </div>
-              <div>
-                <span>Maturity</span>
-                <strong>{formatDateTime(confirmAction.deposit.maturityAt)}</strong>
-              </div>
-              <div>
-                <span>Status</span>
-                <strong>{statusLabel(confirmAction.deposit.status)}</strong>
-              </div>
+              <p style={{ color: "var(--muted)", fontSize: "14px", lineHeight: "1.6" }}>
+                {getActionSummary(confirmAction.action, confirmAction.deposit, selectedPlanId)}
+              </p>
             </div>
-            <p className="popup-copy">
-              {getActionSummary(confirmAction.action, confirmAction.deposit, selectedPlanId)}
-            </p>
-            <div className="popup-actions">
-              <button type="button" onClick={closeConfirmAction}>
-                Cancel
-              </button>
-              <button className="primary" type="button" onClick={executeConfirmedAction}>
-                Confirm
-              </button>
+            <div className="modal-footer">
+              <button className="secondary" onClick={closeConfirmAction}>Cancel</button>
+              <button className="primary" onClick={executeConfirmedAction}>Confirm Action</button>
             </div>
           </div>
         </div>
       )}
 
       {popup.open && (
-        <div className="popup-backdrop" onClick={closePopup} role="presentation">
-          <div
-            className="popup-card"
-            onClick={(event) => event.stopPropagation()}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="popup-title"
-          >
-            <div className="popup-head">
-              <div>
-                <p className="eyebrow">Transaction Notice</p>
-                <h2 id="popup-title">{popup.title}</h2>
-              </div>
-              <button type="button" onClick={closePopup}>
-                Close
-              </button>
+        <div className="modal-overlay" onClick={closePopup}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{popup.title}</h3>
+              <button className="secondary" onClick={closePopup}>&times;</button>
             </div>
-            <p className="popup-copy">{popup.body}</p>
-          </div>
-        </div>
-      )}
-
-      {walletDisconnectOpen && (
-        <div className="popup-backdrop" onClick={closeWalletDisconnectConfirm} role="presentation">
-          <div
-            className="popup-card"
-            onClick={(event) => event.stopPropagation()}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="wallet-disconnect-title"
-          >
-            <div className="popup-head">
-              <div>
-                <p className="eyebrow">Wallet Session</p>
-                <h2 id="wallet-disconnect-title">Disconnect wallet session</h2>
-              </div>
-              <button type="button" onClick={closeWalletDisconnectConfirm}>
-                Close
-              </button>
+            <div className="modal-body">
+              <p style={{ color: "var(--muted)", lineHeight: "1.6" }}>{popup.body}</p>
             </div>
-            <p className="popup-copy">
-              This only clears the current app session. To fully disconnect this site, remove the
-              connection in MetaMask.
-            </p>
-            <div className="popup-actions">
-              <button type="button" onClick={closeWalletDisconnectConfirm}>
-                Cancel
-              </button>
-              <button className="primary" type="button" onClick={disconnectWallet}>
-                Disconnect
-              </button>
+            <div className="modal-footer">
+              <button className="primary" onClick={closePopup}>Understood</button>
             </div>
           </div>
         </div>
       )}
-
-      <div className="ambient ambient-one" />
-      <div className="ambient ambient-two" />
-      <div className="ambient ambient-three" />
-
-      <header className="hero">
-        <div className="hero-copy">
-          <p className="eyebrow">Neon Savings Console</p>
-          <h1>
-            Fixed-Term Deposits
-            <span className="hero-title-accent"> Managed With On-Chain Settlement</span>
-          </h1>
-          <p className="lead">
-            A high-clarity banking dashboard for opening fixed-term positions, tracking yield
-            obligations, and settling vault-funded interest with certificate-based ownership.
-          </p>
-        </div>
-        <div className="hero-actions">
-          <button className="primary" onClick={handleWalletButtonClick}>
-            {account ? "Disconnect Wallet" : "Connect Wallet"}
-          </button>
-        </div>
-      </header>
-
-      <section className="banner-grid">
-        <article className={`banner-card banner-${txTone}`}>
-          <span className="banner-label">Status</span>
-          <strong>{message || "Ready."}</strong>
-          <small>
-            {onExpectedNetwork
-              ? `${walletTokenBalance} USDC available`
-              : `Switch to chain ${LOCAL_NETWORK.chainId}`}
-          </small>
-        </article>
-      </section>
-
-      <section className="overview-grid">
-        <article className="metric-card spotlight">
-          <span className="metric-label">Wallet</span>
-          <strong className="data-mono">{shortAddress(account)}</strong>
-          <small>{isAdmin ? "Operator" : currentRole}</small>
-          <small>{getNetworkLabel(chainId, network)}</small>
-          <small>{hasMetaMask ? "MetaMask detected" : "MetaMask not detected"}</small>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Portfolio</span>
-          <strong className="data-mono">{activeDeposits.length}</strong>
-          <small>{formatAmount(totalPrincipal)} USDC principal</small>
-          <small>{formatAmount(totalInterest)} USDC expected yield</small>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Vault</span>
-          <strong className="data-mono">{vaultBalance} USDC</strong>
-          <small>{paused ? "System paused" : "Interest reserve available"}</small>
-        </article>
-      </section>
-
-      <section className="panel compact-panel">
-        <div className="section-head">
+      <aside className="sidebar">
+        <div className="sidebar-logo">
+          <div className="brand-mark">N</div>
           <div>
-            <p className="section-kicker">Savings Options</p>
-            <h2>Open A New Position</h2>
+            <h1>Nebula Earn</h1>
+            <span>Fixed yield protocol</span>
           </div>
-          <small>{plans.length} plan{plans.length === 1 ? "" : "s"}</small>
         </div>
-        <div className="action-bar">
-          <input
-            aria-label="Selected plan"
-            value={selectedPlanId}
-            onChange={(event) => setSelectedPlanId(event.target.value)}
-            placeholder="Plan ID"
-          />
-          <input
-            aria-label="Deposit amount"
-            value={depositAmount}
-            onChange={(event) => setDepositAmount(event.target.value)}
-            placeholder="Amount in USDC"
-          />
+
+        <nav className="nav-links">
           <button
-            className="primary"
-            disabled={
-              !canUseContracts ||
-              paused ||
-              !onExpectedNetwork ||
-              !selectedPlan?.enabled ||
-              !hasMockUsdcBalance
-            }
-            onClick={handleOpenDeposit}
+            className={`nav-item ${activeTab === "dashboard" ? "active" : ""}`}
+            onClick={() => setActiveTab("dashboard")}
           >
-            Open Deposit
+            <span className="nav-dot"></span>
+            <span>Overview</span>
           </button>
-        </div>
-        <small className="support-copy">
-          {getActionHint({
-            paused,
-            isActive: true,
-            isMatured: true,
-            canAutoRenew: true,
-            canUseContracts,
-            account,
-            planEnabled: selectedPlan?.enabled,
-            hasMockUsdcBalance
-          })}
-        </small>
-        <div className="plan-grid">
-          {plans.length === 0 && <p className="empty-state">No plans are available yet.</p>}
-          {plans.map((plan) => {
-            const isSelected = plan.planId.toString() === selectedPlanId;
-            return (
-              <article
-                key={plan.planId.toString()}
-                className={`plan-card ${isSelected ? "plan-card-selected" : ""} ${
-                  plan.enabled ? "" : "plan-card-disabled"
-                }`}
-              >
-                <div className="plan-topline">
-                  <span className="plan-id">Plan #{plan.planId.toString()}</span>
-                  <span className={`status-pill ${plan.enabled ? "status-live" : "status-muted"}`}>
-                    {plan.enabled ? "Enabled" : "Disabled"}
-                  </span>
-                </div>
-                <h3>{plan.tenorDays.toString()}-Day Fixed Term</h3>
-                <p className="plan-summary">
-                  Locked principal with fixed APR snapshot, explicit deposit bounds, and defined
-                  early-withdraw penalty.
-                </p>
-                <div className="plan-metrics">
-                  <div>
-                    <span>APR</span>
-                    <strong className="data-mono">{plan.aprBps.toString()} bps</strong>
-                  </div>
-                  <div>
-                    <span>Range</span>
-                    <strong className="data-mono">
-                      {formatAmount(plan.minDeposit)} -{" "}
-                      {plan.maxDeposit === 0n ? "No cap" : `${formatAmount(plan.maxDeposit)} USDC`}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Penalty</span>
-                    <strong className="data-mono">{plan.earlyWithdrawPenaltyBps.toString()} bps</strong>
-                  </div>
-                </div>
-                <div className="plan-actions">
-                  <button
-                    className={isSelected ? "secondary-selected" : ""}
-                    onClick={() => setSelectedPlanId(plan.planId.toString())}
-                    disabled={!plan.enabled}
-                  >
-                    {isSelected ? "Selected" : "Use This Plan"}
-                  </button>
-                  {isAdmin && (
-                    <button
-                      onClick={() => handleTogglePlan(plan.planId, plan.enabled)}
-                      disabled={!canUseContracts || !onExpectedNetwork}
-                    >
-                      {plan.enabled ? "Disable Plan" : "Enable Plan"}
-                    </button>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      {isAdmin && (
-        <section className="panel admin-panel admin-accordion">
-          <button className="accordion-trigger" onClick={() => setAdminOpen((value) => !value)}>
-            <span>Operator Controls</span>
-            <span>{adminOpen ? "Hide" : "Show"}</span>
+          <button
+            className={`nav-item ${activeTab === "plans" ? "active" : ""}`}
+            onClick={() => setActiveTab("plans")}
+          >
+            <span className="nav-dot"></span>
+            <span>Earn</span>
           </button>
-          {adminOpen && (
-            <div className="admin-grid">
-              <div className="admin-card">
-                <h3>Create New Plan</h3>
-                <label>Tenor days</label>
-                <input
-                  value={planForm.tenorDays}
-                  onChange={(event) => setPlanForm({ ...planForm, tenorDays: event.target.value })}
-                />
-                <label>APR (bps)</label>
-                <input
-                  value={planForm.aprBps}
-                  onChange={(event) => setPlanForm({ ...planForm, aprBps: event.target.value })}
-                />
-                <label>Min deposit (USDC)</label>
-                <input
-                  value={planForm.minDeposit}
-                  onChange={(event) => setPlanForm({ ...planForm, minDeposit: event.target.value })}
-                />
-                <label>Max deposit (USDC, 0 = no cap)</label>
-                <input
-                  value={planForm.maxDeposit}
-                  onChange={(event) => setPlanForm({ ...planForm, maxDeposit: event.target.value })}
-                />
-                <label>Penalty (bps)</label>
-                <input
-                  value={planForm.penaltyBps}
-                  onChange={(event) => setPlanForm({ ...planForm, penaltyBps: event.target.value })}
-                />
-                <button onClick={handleCreatePlan} disabled={!canUseContracts || !onExpectedNetwork}>
-                  Create Plan
-                </button>
-              </div>
-
-              <div className="admin-card">
-                <h3>Plan Management</h3>
-                <label>Plan ID</label>
-                <input
-                  value={planAdminForm.planId}
-                  onChange={(event) =>
-                    setPlanAdminForm({ ...planAdminForm, planId: event.target.value })
-                  }
-                />
-                <label>New APR (bps)</label>
-                <input
-                  value={planAdminForm.newAprBps}
-                  onChange={(event) =>
-                    setPlanAdminForm({ ...planAdminForm, newAprBps: event.target.value })
-                  }
-                />
-                <button onClick={handleUpdatePlan} disabled={!canUseContracts || !onExpectedNetwork}>
-                  Update APR
-                </button>
-                <small>
-                  Use the plan cards above to enable or disable plans without redeploying.
-                </small>
-              </div>
-
-              <div className="admin-card">
-                <h3>Vault Operations</h3>
-                <label>Vault funding (USDC)</label>
-                <input value={vaultAmount} onChange={(event) => setVaultAmount(event.target.value)} />
-                <button onClick={handleFundVault} disabled={!canUseContracts || !onExpectedNetwork}>
-                  Fund Vault
-                </button>
-                <label>Vault withdrawal (USDC)</label>
-                <input
-                  value={vaultWithdrawAmount}
-                  onChange={(event) => setVaultWithdrawAmount(event.target.value)}
-                />
-                <button
-                  onClick={handleWithdrawVault}
-                  disabled={!canUseContracts || !onExpectedNetwork}
-                >
-                  Withdraw Free Liquidity
-                </button>
-                <small>Only liquidity above reserved interest obligations can be withdrawn.</small>
-                <div className="admin-actions-inline">
-                  <button
-                    onClick={() => handlePause(true)}
-                    disabled={!canUseContracts || !onExpectedNetwork || paused}
-                  >
-                    Pause System
-                  </button>
-                  <button
-                    onClick={() => handlePause(false)}
-                    disabled={!canUseContracts || !onExpectedNetwork || !paused}
-                  >
-                    Resume System
-                  </button>
-                </div>
-              </div>
-
-              <div className="admin-card">
-                <h3>Fee Receiver</h3>
-                <label>Current fee receiver</label>
-                <input value={currentFeeReceiver} readOnly />
-                <label>New fee receiver</label>
-                <input
-                  value={feeReceiverAddress}
-                  onChange={(event) => setFeeReceiverAddress(event.target.value)}
-                />
-                <button
-                  onClick={handleSetFeeReceiver}
-                  disabled={!canUseContracts || !onExpectedNetwork || !feeReceiverAddress}
-                >
-                  Update Fee Receiver
-                </button>
-                <small>Early-withdraw penalties are sent to this address.</small>
-              </div>
-            </div>
+          <button
+            className={`nav-item ${activeTab === "portfolio" ? "active" : ""}`}
+            onClick={() => setActiveTab("portfolio")}
+          >
+            <span className="nav-dot"></span>
+            <span>Portfolio</span>
+          </button>
+          {isAdmin && (
+            <button
+              className={`nav-item ${activeTab === "admin" ? "active" : ""}`}
+              onClick={() => setActiveTab("admin")}
+            >
+              <span className="nav-dot"></span>
+              <span>Operations</span>
+            </button>
           )}
-        </section>
-      )}
+        </nav>
 
-      <section className="panel">
-        <div className="section-head">
-          <div>
-            <p className="section-kicker">Certificate Portfolio</p>
-            <h2>Your Deposit Positions</h2>
+        <div className="sidebar-footer">
+          <button
+            className="secondary"
+            style={{ width: "100%", justifyContent: "center" }}
+            onClick={handleWalletButtonClick}
+          >
+            {account ? "Disconnect" : "Connect Wallet"}
+          </button>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <header className="top-header">
+          <div className="header-title">
+            <h2>{activeTab === "dashboard" ? "Overview" : activeTab === "plans" ? "Earn" : activeTab === "admin" ? "Operations" : "Portfolio"}</h2>
+            <p>{paused ? "Protocol is paused" : "Protocol is accepting eligible transactions"}</p>
           </div>
-          <small>{deposits.length} certificate{deposits.length === 1 ? "" : "s"}</small>
+          <div className="header-actions">
+            <div className={`network-badge ${onExpectedNetwork ? "ok" : "warn"}`}>
+              {getNetworkLabel(chainId, network)}
+            </div>
+            {account && (
+              <div className="wallet-badge">
+                <span className="mono">{shortAddress(account)}</span>
+                <span>{isAdmin ? "Operator" : "Client"}</span>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {message && (
+          <div className={`status-banner banner-${txTone}`}>
+            {message}
+          </div>
+        )}
+        <div className="view-container">
+          {activeTab === "dashboard" && renderDashboard()}
+          {activeTab === "plans" && renderPlans()}
+          {activeTab === "portfolio" && renderPortfolio()}
+          {activeTab === "admin" && isAdmin && renderAdmin()}
         </div>
-
-        {deposits.length === 0 && <p className="empty-state">No deposits found for this wallet.</p>}
-
-        <div className="deposit-grid">
-          {deposits.map((deposit) => {
-            const depositId = deposit.depositId.toString();
-            const isActive = statusLabel(deposit.status) === "Active";
-            const maturityTimeMs = Number(deposit.maturityAt) * 1000;
-            const autoRenewTimeMs =
-              maturityTimeMs + AUTO_RENEW_GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
-            const isMatured = maturityTimeMs <= chainNowMs;
-            const canAutoRenew = autoRenewTimeMs <= chainNowMs;
-            const progress = getProgressPercent(
-              deposit.startAt,
-              deposit.maturityAt,
-              chainNowMs / 1000
-            );
-            const settleDisabled = !canUseContracts || !onExpectedNetwork || paused || !isActive || !isMatured;
-            const earlyExitDisabled = !canUseContracts || !onExpectedNetwork || paused || !isActive || isMatured;
-            const manualRenewDisabled =
-              !canUseContracts || !onExpectedNetwork || paused || !isActive || !isMatured;
-            const autoRenewDisabled =
-              !canUseContracts || !onExpectedNetwork || paused || !isActive || !canAutoRenew;
-
-            return (
-              <article key={depositId} className="deposit-card">
-                <div className="deposit-header">
-                  <div>
-                    <span className="deposit-token">Certificate #{depositId}</span>
-                    <h3>Plan #{deposit.planId.toString()}</h3>
-                  </div>
-                  <span
-                    className={`status-pill ${
-                      isActive ? "status-live" : deposit.status === 1n ? "status-danger" : "status-muted"
-                    }`}
-                  >
-                    {statusLabel(deposit.status)}
-                  </span>
-                </div>
-
-                <div className="deposit-progress">
-                  <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${progress}%` }} />
-                  </div>
-                  <small>{progress}% of term elapsed</small>
-                </div>
-
-                <div className="deposit-metrics">
-                  <div>
-                    <span>Principal</span>
-                    <strong className="data-mono">{formatAmount(deposit.principal)} USDC</strong>
-                  </div>
-                  <div>
-                    <span>Interest</span>
-                    <strong className="data-mono">{formatAmount(deposit.expectedInterest)} USDC</strong>
-                  </div>
-                  <div>
-                    <span>APR</span>
-                    <strong className="data-mono">{deposit.aprBpsAtOpen.toString()} bps</strong>
-                  </div>
-                </div>
-
-                <div className="deposit-timeline">
-                  <small>Opened: {formatDateTime(deposit.startAt)}</small>
-                  <small>Maturity: {formatDateTime(deposit.maturityAt)}</small>
-                  <small>Auto renew: {new Date(autoRenewTimeMs).toLocaleString()}</small>
-                </div>
-
-                <div className="deposit-actions">
-                  <button
-                    onClick={() => openConfirmAction("settle", deposit)}
-                    disabled={settleDisabled}
-                  >
-                    Settle
-                  </button>
-                  <button
-                    onClick={() => openConfirmAction("earlyExit", deposit)}
-                    disabled={earlyExitDisabled}
-                  >
-                    Early Exit
-                  </button>
-                  <button
-                    onClick={() => openConfirmAction("manualRenew", deposit)}
-                    disabled={manualRenewDisabled}
-                  >
-                    Manual Renew
-                  </button>
-                  <button
-                    onClick={() => openConfirmAction("autoRenew", deposit)}
-                    disabled={autoRenewDisabled}
-                  >
-                    Auto Renew
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
+      </main>
     </div>
   );
 }

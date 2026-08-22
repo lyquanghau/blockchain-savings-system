@@ -6,6 +6,7 @@
     "compile": "hardhat compile",
     "test": "hardhat test",
     "coverage": "hardhat coverage",
+    "dev": "npm --prefix frontend run dev",
     "node": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.js --network localhost",
     "deploy:testnet:mockusdc": "hardhat run deploy/1-deploy-mockusdc.ts",
